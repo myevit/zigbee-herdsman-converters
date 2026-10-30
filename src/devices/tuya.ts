@@ -1513,6 +1513,12 @@ const tzLocal = {
     } satisfies Tz.Converter,
 };
 
+function validateDualRailPosition(value: number): number {
+    utils.assertNumber(value, "position");
+    if (!Number.isFinite(value) || value < 0 || value > 100) throw new Error("Position must be between 0 and 100");
+    return value;
+}
+
 const ts130fPositionKey = "ts130f_position";
 
 const fzLocal = {
@@ -6912,10 +6918,7 @@ export const definitions: DefinitionWithExtend[] = [
         },
     },
     {
-        fingerprint: [
-            ...tuya.fingerprint("TS0301", ["_TZE210_inpjmc0h", "_TZE210_yqwse3h5"]),
-            {modelID: "YKV24SAED", manufacturerName: "Yooksmart"},
-        ],
+        fingerprint: [...tuya.fingerprint("TS0301", ["_TZE210_inpjmc0h", "_TZE210_yqwse3h5"]), {modelID: "YKV24SAED", manufacturerName: "Yooksmart"}],
         model: "TS0301_dual_rail",
         vendor: "Tuya",
         whiteLabel: [{vendor: "Yooksmart", model: "YKV24SAED", fingerprint: [{modelID: "YKV24SAED", manufacturerName: "Yooksmart"}]}],
@@ -6930,13 +6933,23 @@ export const definitions: DefinitionWithExtend[] = [
             tuyaDatapoints: [
                 // Bottom rail - DP109 is control, DP101 is set position, DP102 is current position
                 [109, "state_bottom", tuya.valueConverterBasic.lookup({OPEN: tuya.enum(0), CLOSE: tuya.enum(1), STOP: tuya.enum(2)})],
-                [101, "position_bottom", tuya.valueConverter.coverPositionInverted],
-                [102, "position_bottom", tuya.valueConverter.coverPositionInverted],
+                [
+                    101,
+                    "position_bottom",
+                    {to: (v: number, meta: Tz.Meta) => tuya.valueConverter.coverPositionInverted.to(validateDualRailPosition(v), meta)},
+                    {optimistic: false},
+                ],
+                [102, "position_bottom", {from: tuya.valueConverter.coverPositionInverted.from}],
                 // Top rail - DP1 is control, DP2 is set position, DP3 is current position
                 // Note: State commands are reversed for Home Assistant compatibility with top-down operation
                 [1, "state_top", tuya.valueConverterBasic.lookup({OPEN: tuya.enum(1), CLOSE: tuya.enum(0), STOP: tuya.enum(2)})],
-                [2, "position_top", tuya.valueConverter.coverPosition],
-                [3, "position_top", tuya.valueConverter.coverPosition],
+                [
+                    2,
+                    "position_top",
+                    {to: (v: number, meta: Tz.Meta) => tuya.valueConverter.coverPosition.to(validateDualRailPosition(v), meta)},
+                    {optimistic: false},
+                ],
+                [3, "position_top", {from: tuya.valueConverter.coverPosition.from}],
                 // Battery
                 [13, "battery", tuya.valueConverter.raw],
             ],
