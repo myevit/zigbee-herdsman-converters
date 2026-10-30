@@ -6932,24 +6932,48 @@ export const definitions: DefinitionWithExtend[] = [
         meta: {
             tuyaDatapoints: [
                 // Bottom rail - DP109 is control, DP101 is set position, DP102 is current position
-                [109, "state_bottom", tuya.valueConverterBasic.lookup({OPEN: tuya.enum(0), CLOSE: tuya.enum(1), STOP: tuya.enum(2)})],
+                [
+                    109,
+                    "state_bottom",
+                    {to: tuya.valueConverterBasic.lookup({OPEN: tuya.enum(0), CLOSE: tuya.enum(1), STOP: tuya.enum(2)}).to},
+                    {optimistic: false},
+                ],
                 [
                     101,
                     "position_bottom",
                     {to: (v: number, meta: Tz.Meta) => tuya.valueConverter.coverPositionInverted.to(validateDualRailPosition(v), meta)},
                     {optimistic: false},
                 ],
-                [102, "position_bottom", {from: tuya.valueConverter.coverPositionInverted.from}],
+                [
+                    102,
+                    "position_bottom",
+                    {
+                        from: (v, meta, options, publish) =>
+                            tuya.valueConverter.coverPositionInverted.from(v, meta, options, ({state}) => publish({state_bottom: state})),
+                    },
+                ],
                 // Top rail - DP1 is control, DP2 is set position, DP3 is current position
                 // Note: State commands are reversed for Home Assistant compatibility with top-down operation
-                [1, "state_top", tuya.valueConverterBasic.lookup({OPEN: tuya.enum(1), CLOSE: tuya.enum(0), STOP: tuya.enum(2)})],
+                [
+                    1,
+                    "state_top",
+                    {to: tuya.valueConverterBasic.lookup({OPEN: tuya.enum(1), CLOSE: tuya.enum(0), STOP: tuya.enum(2)}).to},
+                    {optimistic: false},
+                ],
                 [
                     2,
                     "position_top",
                     {to: (v: number, meta: Tz.Meta) => tuya.valueConverter.coverPosition.to(validateDualRailPosition(v), meta)},
                     {optimistic: false},
                 ],
-                [3, "position_top", {from: tuya.valueConverter.coverPosition.from}],
+                [
+                    3,
+                    "position_top",
+                    {
+                        from: (v, meta, options, publish) =>
+                            tuya.valueConverter.coverPosition.from(v, meta, options, ({state}) => publish({state_top: state})),
+                    },
+                ],
                 // Battery
                 [13, "battery", tuya.valueConverter.raw],
             ],

@@ -19,7 +19,11 @@ const setup = async () => {
         const result = await reader.convert(
             definition,
             {
-                data: {dpValues: values.map(([dp, value]) => tuya.dpValueFromNumberValue(dp, value))},
+                data: {
+                    dpValues: values.map(([dp, value]) =>
+                        dp === 1 || dp === 109 ? tuya.dpValueFromEnum(dp, value) : tuya.dpValueFromNumberValue(dp, value),
+                    ),
+                },
                 device,
                 endpoint,
                 type: "commandDataReport",
@@ -61,12 +65,45 @@ describe("TS0301 dual rail", () => {
         expect(endpoint.command).toHaveBeenCalledTimes(1);
     });
 
+    it.each(["top", "bottom"])("does not claim completed state_%s from operation ACKs or motion reports", async (rail) => {
+        const {set, report} = await setup();
+        for (const operation of ["OPEN", "CLOSE", "STOP"]) {
+            expect(await set({[`state_${rail}`]: operation})).toEqual({state: {}});
+        }
+        for (const raw of [0, 1, 2]) {
+            const {result, publish} = await report([[rail === "top" ? 1 : 109, raw]]);
+            expect(result).toEqual({});
+            expect(publish).not.toHaveBeenCalled();
+        }
+    });
+
+    it.each([false, true])("converges only the reporting rail state from actual positions with invert_cover=%s", async (invert) => {
+        const {set, report} = await setup();
+        let state: KeyValue = {};
+        for (const rail of ["top", "bottom"]) {
+            for (const raw of [0, 30, 100]) {
+                expect(await set({[`state_${rail}`]: "CLOSE"}, {invert_cover: invert})).toEqual({state: {}});
+                const position = rail === "top" ? (invert ? 100 - raw : raw) : invert ? raw : 100 - raw;
+                const {result, publish} = await report([[rail === "top" ? 3 : 102, raw]], {invert_cover: invert}, state);
+                expect(result).toEqual({[`position_${rail}`]: position});
+                expect(publish).toHaveBeenCalledExactlyOnceWith({[`state_${rail}`]: position === 0 ? "CLOSE" : "OPEN"});
+                state = {...state, ...result, ...publish.mock.calls[0][0]};
+            }
+        }
+        expect(state).toEqual({
+            position_top: invert ? 0 : 100,
+            state_top: invert ? "CLOSE" : "OPEN",
+            position_bottom: invert ? 100 : 0,
+            state_bottom: invert ? "OPEN" : "CLOSE",
+        });
+    });
+
     it.each([false, true])("decodes independent actual positions with invert_cover=%s", async (invert) => {
         const {report} = await setup();
         const options = {invert_cover: invert};
         const top = await report([[3, 23]], options);
         expect(top.result).toEqual({position_top: invert ? 77 : 23});
-        expect(top.publish).toHaveBeenCalledWith({state: "OPEN"});
+        expect(top.publish).toHaveBeenCalledWith({state_top: "OPEN"});
         const bottom = await report([[102, 68]], options);
         expect(bottom.result).toEqual({position_bottom: invert ? 68 : 32});
         expect(
