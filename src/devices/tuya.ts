@@ -6912,9 +6912,13 @@ export const definitions: DefinitionWithExtend[] = [
         },
     },
     {
-        fingerprint: tuya.fingerprint("TS0301", ["_TZE210_inpjmc0h", "_TZE210_yqwse3h5"]),
+        fingerprint: [
+            ...tuya.fingerprint("TS0301", ["_TZE210_inpjmc0h", "_TZE210_yqwse3h5"]),
+            {modelID: "YKV24SAED", manufacturerName: "Yooksmart"},
+        ],
         model: "TS0301_dual_rail",
         vendor: "Tuya",
+        whiteLabel: [{vendor: "Yooksmart", model: "YKV24SAED", fingerprint: [{modelID: "YKV24SAED", manufacturerName: "Yooksmart"}]}],
         description: "Top-down bottom-up dual motor shade",
         extend: [tuya.modernExtend.tuyaBase({dp: true}), m.deviceEndpoints({endpoints: {bottom: 1, top: 1}})],
         exposes: [
