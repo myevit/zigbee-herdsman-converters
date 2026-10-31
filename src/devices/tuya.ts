@@ -6923,10 +6923,27 @@ export const definitions: DefinitionWithExtend[] = [
         vendor: "Tuya",
         whiteLabel: [{vendor: "Yooksmart", model: "YKV24SAED", fingerprint: [{modelID: "YKV24SAED", manufacturerName: "Yooksmart"}]}],
         description: "Top-down bottom-up dual motor shade",
-        extend: [tuya.modernExtend.tuyaBase({dp: true}), m.deviceEndpoints({endpoints: {bottom: 1, top: 1}})],
+        extend: [tuya.modernExtend.tuyaBase({dp: true}), m.deviceEndpoints({endpoints: {top: 1, bottom: 1}})],
         exposes: [
-            te.coverPosition().withEndpoint("bottom").withDescription("Bottom rail"),
-            te.coverPosition().withEndpoint("top").withDescription("Top rail"),
+            ...[
+                te.coverPosition().withEndpoint("top").withDescription("Top rail"),
+                te.coverPosition().withEndpoint("bottom").withDescription("Bottom rail"),
+            ].map((cover) => {
+                const top = cover.endpoint === "top";
+                cover.features[0]
+                    .withLabel(top ? "Top rail control" : "Bottom rail control")
+                    .withDescription(
+                        top ? "Open lowers the top rail. Close raises the top rail." : "Open raises the bottom rail. Close lowers the bottom rail.",
+                    );
+                cover.features[1]
+                    .withLabel(top ? "Opening from top" : "Opening from bottom")
+                    .withDescription(
+                        top
+                            ? "Opening from the top: 0% = no opening; 100% = maximum opening."
+                            : "Opening from the bottom: 0% = no opening; 100% = maximum opening.",
+                    );
+                return cover;
+            }),
             e.battery(),
         ],
         meta: {

@@ -2,6 +2,8 @@
 
 # zigbee-herdsman-converters
 
+> **Personal fork:** [myevit/zigbee-herdsman-converters](https://github.com/myevit/zigbee-herdsman-converters), maintained for Victor's use with assistance from TARS, an AI assistant under Victor's control. The default `yoolax-dual-rail` branch carries fork-specific changes; it is not an upstream release or endorsement. See [FORK.md](FORK.md) for scope and maintenance notes. The upstream documentation follows unchanged.
+
 Collection of device converters to be used with zigbee-herdsman.
 
 ## Contributing

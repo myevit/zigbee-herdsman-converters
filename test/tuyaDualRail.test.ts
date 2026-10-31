@@ -45,6 +45,21 @@ const setup = async () => {
 };
 
 describe("TS0301 dual rail", () => {
+    it("labels rail controls and opening percentages without renaming native properties", async () => {
+        const {definition} = await setup();
+        const covers = definition.exposes.filter((expose) => expose.type === "cover");
+        expect(covers.map((cover) => cover.endpoint)).toEqual(["top", "bottom"]);
+        expect(covers.flatMap((cover) => cover.features.map(({property, label, description}) => ({property, label, description})))).toEqual([
+            {property: "state_top", label: "Top rail control", description: "Open lowers the top rail. Close raises the top rail."},
+            {property: "position_top", label: "Opening from top", description: "Opening from the top: 0% = no opening; 100% = maximum opening."},
+            {property: "state_bottom", label: "Bottom rail control", description: "Open raises the bottom rail. Close lowers the bottom rail."},
+            {
+                property: "position_bottom",
+                label: "Opening from bottom",
+                description: "Opening from the bottom: 0% = no opening; 100% = maximum opening.",
+            },
+        ]);
+    });
     it("ignores top target echoes instead of publishing measured position", async () => {
         const {report} = await setup();
         const {result, publish} = await report([[2, 73]]);
@@ -297,7 +312,8 @@ describe("TS0301 dual rail", () => {
         expect(branded.toZigbee).toEqual(definition.toZigbee);
         expect(branded.exposes).toEqual(definition.exposes);
         const exposes = definition.exposes as {type: string; endpoint?: string; name?: string}[];
-        expect(exposes.filter((expose) => expose.type === "cover").map((expose) => expose.endpoint)).toEqual(["bottom", "top"]);
+        expect(exposes.filter((expose) => expose.type === "cover").map((expose) => expose.endpoint)).toEqual(["top", "bottom"]);
+        expect(Object.keys(definition.endpoint(deviceFor()))).toEqual(["top", "bottom"]);
         expect(exposes.filter((expose) => expose.name === "battery")).toHaveLength(1);
     });
 
