@@ -1,34 +1,42 @@
 import {describe, expect, it, vi} from "vitest";
+import {Zcl} from "zigbee-herdsman";
+import {BuffaloZcl} from "zigbee-herdsman/dist/zspec/zcl/buffaloZcl";
 import {findByDevice} from "../src/index";
 import * as tuya from "../src/lib/tuya";
 import type {Fz, KeyValue, Tz} from "../src/lib/types";
 import {mockDevice} from "./utils";
 
-const deviceFor = (modelID = "TS0301", manufacturerName = "_TZE210_yqwse3h5") =>
-    mockDevice({modelID, manufacturerName, applicationVersion: 96, endpoints: [{ID: 1}]});
+const deviceFor = (modelID = "TS0301", manufacturerName = "_TZE210_yqwse3h5", ieeeAddr = "0x0000000000000001") =>
+    mockDevice({modelID, manufacturerName, ieeeAddr, applicationVersion: 96, endpoints: [{ID: 1}]});
 
 let sequence = 0;
-const setup = async () => {
-    const device = deviceFor();
+const setup = async (manufacturer = "_TZE210_yqwse3h5", ieeeAddr = "0x0000000000000001") => {
+    const device = deviceFor(manufacturer === "Yooksmart" ? "YKV24SAED" : "TS0301", manufacturer, ieeeAddr);
     const definition = await findByDevice(device);
     const endpoint = device.getEndpoint(1);
     const setter = definition.toZigbee.find((converter) => converter === tuya.tz.datapoints);
-    const reader = definition.fromZigbee.find((converter) => converter === tuya.fz.datapoints);
-    const report = async (values: [number, number][], options: KeyValue = {}, state: KeyValue = {}) => {
+    const reader = definition.fromZigbee.find(
+        (converter) =>
+            converter.cluster === "manuSpecificTuya" &&
+            converter.type.includes("commandDataReport") &&
+            !converter.type.includes("commandMcuSyncTime"),
+    );
+    const reportRaw = async (
+        dpValues: Parameters<typeof tuya.getDataValue>[0][],
+        options: KeyValue = {},
+        state: KeyValue = {},
+        transactionSequenceNumber = sequence++,
+    ) => {
         const publish = vi.fn();
         const result = await reader.convert(
             definition,
             {
-                data: {
-                    dpValues: values.map(([dp, value]) =>
-                        dp === 1 || dp === 109 ? tuya.dpValueFromEnum(dp, value) : tuya.dpValueFromNumberValue(dp, value),
-                    ),
-                },
+                data: {dpValues},
                 device,
                 endpoint,
                 type: "commandDataReport",
                 cluster: "manuSpecificTuya",
-                meta: {zclTransactionSequenceNumber: sequence++},
+                meta: {zclTransactionSequenceNumber: transactionSequenceNumber},
             } as Fz.Message<"manuSpecificTuya", undefined, "commandDataReport">,
             publish,
             options,
@@ -36,15 +44,69 @@ const setup = async () => {
         );
         return {result, publish};
     };
+    const report = (values: [number, number][], options: KeyValue = {}, state: KeyValue = {}) =>
+        reportRaw(
+            values.map(([dp, value]) => (dp === 1 || dp === 109 ? tuya.dpValueFromEnum(dp, value) : tuya.dpValueFromNumberValue(dp, value))),
+            options,
+            state,
+        );
     const set = (message: KeyValue, options: KeyValue = {}, endpointName?: string) => {
         const key = Object.keys(message)[0];
         const meta: Tz.Meta = {device, mapped: definition, state: {}, message, options, publish: vi.fn(), endpoint_name: endpointName};
         return setter.convertSet(endpoint, key, message[key], meta);
     };
-    return {device, definition, endpoint, report, set};
+    return {device, definition, endpoint, report, reportRaw, set};
 };
 
 describe("TS0301 dual rail", () => {
+    it("ignores an empty numeric actual position accepted by the herdsman wire parser", async () => {
+        const {reportRaw} = await setup();
+        const dpValues = new BuffaloZcl(Buffer.from([3, 2, 0, 0])).read(Zcl.BuffaloZclDataType.LIST_TUYA_DATAPOINT_VALUES, {});
+        expect(dpValues).toEqual([{dp: 3, datatype: 2, data: Buffer.alloc(0)}]);
+        const {result, publish} = await reportRaw(dpValues, {}, {position_top: 37, state_top: "OPEN"});
+        expect(result).toEqual({});
+        expect(publish).not.toHaveBeenCalled();
+    });
+
+    it.each([3, 102])("ignores malformed DP%s without dropping its valid sibling or battery", async (dp) => {
+        const {reportRaw} = await setup();
+        const sibling = dp === 3 ? 102 : 3;
+        const rail = sibling === 3 ? "top" : "bottom";
+        const invalid = [
+            {datatype: 2, data: Buffer.alloc(0)},
+            {datatype: 2, data: Buffer.from([0])},
+            {datatype: 2, data: Buffer.from([0, 0, 0])},
+            {datatype: 2, data: Buffer.from([0, 0, 0, 0, 0])},
+            {datatype: 3, data: Buffer.from("100")},
+            {datatype: 1, data: Buffer.from([0])},
+            {datatype: 0, data: Buffer.alloc(4)},
+            {datatype: 4, data: Buffer.from([100])},
+            {datatype: 5, data: Buffer.from([0, 0, 0, 100])},
+            {datatype: 2, data: Buffer.from([0, 0, 0, 101])},
+            {datatype: 2, data: Buffer.from([255, 255, 255, 255])},
+        ];
+        for (const value of invalid) {
+            // Round-trip the malformed and valid entries through the real herdsman DP parser.
+            const entries = [{dp, ...value}, tuya.dpValueFromNumberValue(sibling, 25), tuya.dpValueFromNumberValue(13, 90)];
+            const wire = Buffer.concat(entries.map(({dp, datatype, data}) => Buffer.concat([Buffer.from([dp, datatype, 0, data.length]), data])));
+            const dpValues = new BuffaloZcl(wire).read(Zcl.BuffaloZclDataType.LIST_TUYA_DATAPOINT_VALUES, {});
+            const {result, publish} = await reportRaw(dpValues, {}, {position_top: 37, state_top: "OPEN", position_bottom: 0, state_bottom: "CLOSE"});
+            expect(result, JSON.stringify(value)).toEqual({[`position_${rail}`]: sibling === 3 ? 25 : 75, battery: 90});
+            expect(publish).toHaveBeenCalledExactlyOnceWith({[`state_${rail}`]: "OPEN"});
+        }
+    });
+
+    it.each(["_TZE210_inpjmc0h", "_TZE210_yqwse3h5", "Yooksmart"])("validates reports on the shared definition for %s", async (manufacturer) => {
+        const {reportRaw} = await setup(manufacturer);
+        const {result, publish} = await reportRaw([
+            {dp: 3, datatype: 2, data: Buffer.alloc(0)},
+            {dp: 102, datatype: 3, data: Buffer.from("100")},
+            tuya.dpValueFromNumberValue(13, 90),
+        ]);
+        expect(result).toEqual({battery: 90});
+        expect(publish).not.toHaveBeenCalled();
+    });
+
     it("labels rail controls and opening percentages without renaming native properties", async () => {
         const {definition} = await setup();
         const covers = definition.exposes.filter((expose) => expose.type === "cover");
@@ -265,12 +327,14 @@ describe("TS0301 dual rail", () => {
     });
 
     it("keeps devices independent", async () => {
-        const first = await setup();
-        const second = await setup();
+        const first = await setup(undefined, "0x0000000000000001");
+        const second = await setup(undefined, "0x0000000000000002");
+        expect(first.device.ieeeAddr).not.toBe(second.device.ieeeAddr);
         await first.set({position_top: 40});
         expect(second.endpoint.command).not.toHaveBeenCalled();
-        expect((await second.report([[13, 81]])).result).toEqual({battery: 81});
-        expect((await second.report([[102, 40]])).result).toEqual({position_bottom: 60});
+        const packet = [tuya.dpValueFromNumberValue(3, 20), tuya.dpValueFromNumberValue(102, 40), tuya.dpValueFromNumberValue(13, 81)];
+        expect((await first.reportRaw(packet, {}, {}, 42)).result).toEqual({position_top: 20, position_bottom: 60, battery: 81});
+        expect((await second.reportRaw(packet, {}, {}, 42)).result).toEqual({position_top: 20, position_bottom: 60, battery: 81});
     });
 
     it.each(["top", "bottom"])("rejects invalid %s position before writing", async (rail) => {

@@ -1522,6 +1522,23 @@ function validateDualRailPosition(value: number): number {
 const ts130fPositionKey = "ts130f_position";
 
 const fzLocal = {
+    dualRailDatapoints: {
+        ...tuya.fz.datapoints,
+        convert: (model, msg, publish, options, meta) => {
+            // Reject malformed actual positions before generic decoding can publish a false rail state.
+            const dpValues = msg.data.dpValues.filter((dp) => {
+                if (dp.dp !== 3 && dp.dp !== 102) return true;
+                if (dp.datatype !== tuya.dataTypes.number || dp.data.length !== 4) return false;
+                const value = tuya.getDataValue(dp);
+                return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 100;
+            });
+            return tuya.fz.datapoints.convert(model, {...msg, data: {...msg.data, dpValues}}, publish, options, meta);
+        },
+    } satisfies Fz.Converter<
+        "manuSpecificTuya",
+        undefined,
+        ["commandDataResponse", "commandDataReport", "commandActiveStatusReport", "commandActiveStatusReportAlt"]
+    >,
     // FUT035Z+ (_TZB210_ue01a0s2) reports RF color temperature changes
     // as raw lightingColorCtrl frames without updating colorTemperature.
     FUT035ZrfColorTemp: {
@@ -6923,7 +6940,9 @@ export const definitions: DefinitionWithExtend[] = [
         vendor: "Tuya",
         whiteLabel: [{vendor: "Yooksmart", model: "YKV24SAED", fingerprint: [{modelID: "YKV24SAED", manufacturerName: "Yooksmart"}]}],
         description: "Top-down bottom-up dual motor shade",
-        extend: [tuya.modernExtend.tuyaBase({dp: true}), m.deviceEndpoints({endpoints: {top: 1, bottom: 1}})],
+        extend: [tuya.modernExtend.tuyaBase(), m.deviceEndpoints({endpoints: {top: 1, bottom: 1}})],
+        fromZigbee: [fzLocal.dualRailDatapoints],
+        toZigbee: [tuya.tz.datapoints],
         exposes: [
             ...[
                 te.coverPosition().withEndpoint("top").withDescription("Top rail"),
